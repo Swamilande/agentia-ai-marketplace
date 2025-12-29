@@ -12,6 +12,15 @@ const badgeVariants = cva(
         secondary: "border-transparent bg-secondary text-secondary-foreground hover:bg-secondary/80",
         destructive: "border-transparent bg-destructive text-destructive-foreground hover:bg-destructive/80",
         outline: "text-foreground",
+        // Marketplace variants
+        category:
+          "bg-background/60 backdrop-blur-md text-foreground border-foreground/10 rounded-2xl px-4 py-2 text-[10px] uppercase tracking-[0.2em] font-black",
+        live:
+          "bg-green-500/80 backdrop-blur-md text-foreground border-none rounded-2xl px-3 py-1.5 text-[10px] uppercase tracking-[0.15em] font-black",
+        info:
+          "bg-primary/10 border-primary/20 text-primary px-4 py-1 rounded-full text-xs font-medium uppercase tracking-widest backdrop-blur-sm",
+        glass:
+          "glass-card border-foreground/10 text-foreground rounded-full",
       },
     },
     defaultVariants: {
