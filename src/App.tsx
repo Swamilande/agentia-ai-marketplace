@@ -8,6 +8,8 @@ import Marketplace from "./pages/Marketplace";
 import AgentDetail from "./pages/AgentDetail";
 import Login from "./pages/auth/Login";
 import Signup from "./pages/auth/Signup";
+import About from "./pages/About";
+import Contact from "./pages/Contact";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -24,6 +26,8 @@ const App = () => (
           <Route path="/agents/:id" element={<AgentDetail />} />
           <Route path="/auth/login" element={<Login />} />
           <Route path="/auth/signup" element={<Signup />} />
+          <Route path="/about" element={<About />} />
+          <Route path="/contact" element={<Contact />} />
           <Route path="*" element={<NotFound />} />
         </Routes>
       </BrowserRouter>
