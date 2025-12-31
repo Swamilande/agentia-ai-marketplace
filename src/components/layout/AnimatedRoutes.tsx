@@ -1,6 +1,7 @@
 import { Routes, Route, useLocation } from "react-router-dom";
 import { AnimatePresence } from "framer-motion";
 import { PageTransition } from "./PageTransition";
+import { ProtectedRoute } from "./ProtectedRoute";
 import Index from "@/pages/Index";
 import Marketplace from "@/pages/Marketplace";
 import AgentDetail from "@/pages/AgentDetail";
@@ -76,9 +77,11 @@ export const AnimatedRoutes = () => {
         <Route
           path="/dashboard"
           element={
-            <PageTransition>
-              <Dashboard />
-            </PageTransition>
+            <ProtectedRoute>
+              <PageTransition>
+                <Dashboard />
+              </PageTransition>
+            </ProtectedRoute>
           }
         />
         <Route
