@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { motion } from "framer-motion";
 import { Link } from "react-router-dom";
 import { Navbar } from "@/components/layout/Navbar";
@@ -24,7 +24,9 @@ import {
   Plus
 } from "lucide-react";
 import { useAuthStore } from "@/stores/authStore";
+import { usePurchaseStore } from "@/stores/purchaseStore";
 import { emptyDashboardData, mockDashboardData, type DashboardAgent } from "@/data/mockDashboardData";
+import { mockAgents } from "@/data/mockAgents";
 import { useNavigate, useSearchParams } from "react-router-dom";
 
 // Simulate whether user is new (for demo, use localStorage to track)
@@ -54,14 +56,48 @@ const Dashboard = () => {
   const [searchParams] = useSearchParams();
   const { user } = useAuthStore();
   const { isNew, markAsExperienced } = useIsNewUser();
+  const { purchases } = usePurchaseStore();
+  
+  // Get real purchased agents from the store
+  const realPurchasedAgents: DashboardAgent[] = useMemo(() => {
+    if (!user?.id) return [];
+    
+    return purchases
+      .filter(p => p.userId === user.id && p.status === 'completed')
+      .map(purchase => {
+        const agent = mockAgents.find(a => a.id === purchase.agentId);
+        if (!agent) return null;
+        
+        return {
+          id: agent.id,
+          name: agent.name,
+          description: agent.description,
+          category: agent.category,
+          status: 'active' as const,
+          imageUrl: agent.imageUrl,
+          apiCalls: Math.floor(Math.random() * 1000),
+          createdAt: purchase.purchasedAt,
+          purchasedAt: purchase.purchasedAt,
+        };
+      })
+      .filter(Boolean) as DashboardAgent[];
+  }, [purchases, user?.id]);
   
   // Use empty data for new users, mock data for experienced users
-  const dashboardData = isNew ? emptyDashboardData : mockDashboardData;
+  const baseDashboardData = isNew ? emptyDashboardData : mockDashboardData;
+  
+  // Merge real purchases with mock data
+  const dashboardData = {
+    ...baseDashboardData,
+    purchasedAgents: realPurchasedAgents.length > 0 ? realPurchasedAgents : baseDashboardData.purchasedAgents,
+  };
   
   const defaultTab = searchParams.get('tab') || 'agents';
   
+  const totalAgents = dashboardData.createdAgents.length + realPurchasedAgents.length;
+  
   const stats = [
-    { label: "Total Agents", value: dashboardData.stats.totalAgents.toString(), icon: Bot, change: isNew ? "Get started!" : "+1 this month" },
+    { label: "Total Agents", value: totalAgents.toString(), icon: Bot, change: realPurchasedAgents.length > 0 ? `+${realPurchasedAgents.length} purchased` : (isNew ? "Get started!" : "+1 this month") },
     { label: "API Calls", value: dashboardData.stats.apiCalls, icon: Zap, change: isNew ? "-" : "+23% vs last month" },
     { label: "Avg Response", value: dashboardData.stats.avgResponse, icon: Clock, change: isNew ? "-" : "-12% faster" },
     { label: "Success Rate", value: dashboardData.stats.successRate, icon: TrendingUp, change: isNew ? "-" : "+0.5%" },
