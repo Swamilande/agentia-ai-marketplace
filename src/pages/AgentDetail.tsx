@@ -1,6 +1,6 @@
-import { useParams, Link } from "react-router-dom";
+import { useParams, Link, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
-import { ArrowLeft, Star, Shield, Zap, BarChart3, Share2, Check } from "lucide-react";
+import { ArrowLeft, Star, Shield, Zap, BarChart3, Share2, Check, ExternalLink } from "lucide-react";
 import { Navbar } from "@/components/layout/Navbar";
 import { Footer } from "@/components/layout/Footer";
 import { Button } from "@/components/ui/button";
@@ -8,11 +8,34 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { AgentCard } from "@/components/marketplace/AgentCard";
 import { mockAgents } from "@/data/mockAgents";
+import { useAuthStore } from "@/stores/authStore";
+import { usePurchaseStore } from "@/stores/purchaseStore";
 
 const AgentDetail = () => {
   const { id } = useParams();
+  const navigate = useNavigate();
+  const { user, isAuthenticated } = useAuthStore();
+  const { hasPurchased, getPurchase } = usePurchaseStore();
+  
   const agent = mockAgents.find((a) => a.id === id) || mockAgents[0];
   const relatedAgents = mockAgents.filter((a) => a.id !== agent.id).slice(0, 3);
+  
+  const isPurchased = user ? hasPurchased(agent.id, user.id) : false;
+  const purchase = user ? getPurchase(agent.id, user.id) : undefined;
+
+  const handlePurchaseClick = () => {
+    if (!isAuthenticated) {
+      navigate("/auth/login", { state: { from: `/purchase/${agent.id}` } });
+      return;
+    }
+    navigate(`/purchase/${agent.id}`);
+  };
+
+  const handleUseAgent = () => {
+    if (purchase?.agentServerUrl) {
+      window.open(purchase.agentServerUrl, "_blank");
+    }
+  };
 
   const features = [
     "Natural language understanding with 99.2% accuracy",
@@ -99,9 +122,22 @@ const AgentDetail = () => {
                 </div>
 
                 <div className="flex gap-3">
-                  <Button className="flex-1 h-14 rounded-2xl text-base font-bold">
-                    Purchase Now
-                  </Button>
+                  {isPurchased ? (
+                    <Button 
+                      className="flex-1 h-14 rounded-2xl text-base font-bold bg-green-600 hover:bg-green-700"
+                      onClick={handleUseAgent}
+                    >
+                      Use Agent
+                      <ExternalLink className="h-4 w-4 ml-2" />
+                    </Button>
+                  ) : (
+                    <Button 
+                      className="flex-1 h-14 rounded-2xl text-base font-bold"
+                      onClick={handlePurchaseClick}
+                    >
+                      Purchase Now
+                    </Button>
+                  )}
                   <Button variant="outline" size="icon" className="h-14 w-14 rounded-2xl">
                     <Share2 className="h-5 w-5" />
                   </Button>
