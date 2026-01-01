@@ -5,6 +5,7 @@ import { ProtectedRoute } from "./ProtectedRoute";
 import Index from "@/pages/Index";
 import Marketplace from "@/pages/Marketplace";
 import AgentDetail from "@/pages/AgentDetail";
+import Purchase from "@/pages/Purchase";
 import Login from "@/pages/auth/Login";
 import Signup from "@/pages/auth/Signup";
 import About from "@/pages/About";
@@ -39,6 +40,14 @@ export const AnimatedRoutes = () => {
           element={
             <PageTransition>
               <AgentDetail />
+            </PageTransition>
+          }
+        />
+        <Route
+          path="/purchase/:id"
+          element={
+            <PageTransition>
+              <Purchase />
             </PageTransition>
           }
         />
