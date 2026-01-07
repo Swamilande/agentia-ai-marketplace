@@ -1,19 +1,41 @@
 # UPGRADE.md - Agentia World Changes Log
 
-This document tracks all changes, upgrades, and modifications made to the Agentia World platform.
-
 ---
 
-## Version 2.0.0 - Full Backend Integration (Latest)
+## Version 3.0.0 - Full Working Agent System (Latest)
 
 **Date:** January 7, 2026
 
 ### Overview
-Complete integration with backend server at `http://127.0.0.1:8000` for fully functional agent purchases, data persistence, and agent management.
+Complete working agent system with setup wizard, encrypted data handling, real-time workspace, and full backend integration at `http://127.0.0.1:8000`.
 
 ---
 
-### New Features
+### 🚀 New Features
+
+#### 1. Agent Setup Wizard (`src/components/agent/AgentSetupWizard.tsx`)
+- **5-Step Configuration:**
+  1. Business Info (name, industry, target audience)
+  2. Goals & Targets (multi-select from predefined goals)
+  3. Integration (webhook URL, data source, custom instructions)
+  4. API Keys (encrypted storage)
+  5. Review & Launch
+
+#### 2. Agent Workspace (`src/components/agent/AgentWorkspace.tsx`)
+- Real-time chat interface with agent
+- Toggle encrypted/decrypted data view
+- Live metrics: total requests, success rate, avg response time
+- Session management: pause/resume agents
+- Export encrypted conversation data
+
+#### 3. Data Encryption (`src/stores/agentConfigStore.ts`)
+- XOR + Base64 encryption for all inputs/outputs
+- Encrypted data synced to server
+- Secure API key storage
+
+---
+
+## Version 2.0.0 - Full Backend Integration
 
 #### 1. Backend API Service (`src/services/api.ts`)
 - **Purpose:** Centralized API communication with the main server

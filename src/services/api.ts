@@ -1,7 +1,7 @@
 import axios from 'axios';
 
 // Base API configuration
-const API_BASE_URL = 'http://127.0.0.1:8000';
+export const API_BASE_URL = 'http://127.0.0.1:8000';
 
 const api = axios.create({
   baseURL: API_BASE_URL,
@@ -21,6 +21,64 @@ api.interceptors.request.use((config) => {
   }
   return config;
 });
+
+// Agent-specific API functions
+export interface AgentProcessRequest {
+  user_id: string;
+  input: string;
+  session_id?: string;
+}
+
+export interface AgentProcessResponse {
+  response: string;
+  output?: string;
+  encrypted?: boolean;
+  timestamp: string;
+}
+
+// Process agent request
+export const processAgentRequest = async (agentId: string, data: AgentProcessRequest): Promise<AgentProcessResponse> => {
+  try {
+    const response = await api.post<AgentProcessResponse>(`/api/agents/${agentId}/process`, data);
+    return response.data;
+  } catch (error) {
+    console.error('Agent processing error:', error);
+    throw error;
+  }
+};
+
+// Save agent configuration
+export const saveAgentConfig = async (data: {
+  agent_id: string;
+  user_id: string;
+  setup_completed: boolean;
+  setup_data: any;
+}): Promise<boolean> => {
+  try {
+    await api.post('/api/agents/config', data);
+    return true;
+  } catch (error) {
+    console.error('Error saving agent config:', error);
+    return false;
+  }
+};
+
+// Save agent session
+export const saveAgentSession = async (data: {
+  agent_id: string;
+  user_id: string;
+  session_id: string;
+  status: string;
+  metrics: any;
+}): Promise<boolean> => {
+  try {
+    await api.post('/api/agents/session', data);
+    return true;
+  } catch (error) {
+    console.error('Error saving agent session:', error);
+    return false;
+  }
+};
 
 // Types
 export interface PaymentRequest {
