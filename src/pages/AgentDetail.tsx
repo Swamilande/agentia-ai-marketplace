@@ -32,9 +32,8 @@ const AgentDetail = () => {
   };
 
   const handleUseAgent = () => {
-    if (purchase?.agentServerUrl) {
-      window.open(purchase.agentServerUrl, "_blank");
-    }
+    // Navigate to the agent view page
+    navigate(`/agent-view/${agent.id}`);
   };
 
   const features = [

@@ -448,7 +448,7 @@ function AgentCard({ agent, index, navigate }: { agent: DashboardAgent; index: n
             variant="default" 
             size="sm" 
             className="flex-1 rounded-xl"
-            onClick={() => navigate(`/agents/${agent.id}`)}
+            onClick={() => navigate(`/agent-view/${agent.id}`)}
           >
             <Play className="w-4 h-4 mr-2" />
             Launch

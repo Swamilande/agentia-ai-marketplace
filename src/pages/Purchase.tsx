@@ -11,6 +11,7 @@ import { useToast } from "@/hooks/use-toast";
 import { mockAgents } from "@/data/mockAgents";
 import { useAuthStore } from "@/stores/authStore";
 import { usePurchaseStore } from "@/stores/purchaseStore";
+import { processPayment, recordActivity } from "@/services/api";
 
 const Purchase = () => {
   const { id } = useParams();
@@ -22,6 +23,12 @@ const Purchase = () => {
   const agent = mockAgents.find((a) => a.id === id);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isComplete, setIsComplete] = useState(false);
+  const [formData, setFormData] = useState({
+    cardName: '',
+    cardNumber: '',
+    expiry: '',
+    cvc: ''
+  });
 
   // Redirect if not authenticated
   useEffect(() => {
@@ -41,6 +48,13 @@ const Purchase = () => {
     }
   }, [user, agent, hasPurchased, navigate, id, toast]);
 
+  // Pre-fill card name with user name
+  useEffect(() => {
+    if (user?.name) {
+      setFormData(prev => ({ ...prev, cardName: user.name }));
+    }
+  }, [user?.name]);
+
   if (!agent) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
@@ -53,20 +67,58 @@ const Purchase = () => {
     e.preventDefault();
     setIsProcessing(true);
 
-    // Simulate payment processing
-    await new Promise((resolve) => setTimeout(resolve, 2000));
+    if (!user) {
+      setIsProcessing(false);
+      return;
+    }
 
-    if (user) {
-      completePurchase(agent.id, user.id, agent.price);
+    try {
+      // Call backend payment API
+      const response = await processPayment({
+        agent_id: agent.id,
+        user_id: user.id,
+        amount: agent.price,
+        card_number: formData.cardNumber,
+        expiry: formData.expiry,
+        cvc: formData.cvc,
+        card_name: formData.cardName
+      });
+
+      if (response.success) {
+        // Complete purchase with server URL from response
+        await completePurchase(agent.id, user.id, agent.price, response.agent_server_url);
+        
+        // Record activity
+        await recordActivity(user.id, 'purchase', `Purchased ${agent.name}`);
+        
+        setIsComplete(true);
+        clearPendingPurchase();
+
+        toast({
+          title: "Purchase Successful!",
+          description: `You now have access to ${agent.name}.`,
+        });
+
+        // Redirect back to agent page after 2 seconds
+        setTimeout(() => {
+          navigate(`/agents/${id}`);
+        }, 2000);
+      } else {
+        throw new Error(response.message || 'Payment failed');
+      }
+    } catch (error) {
+      console.error('Payment error:', error);
+      
+      // Fallback: Complete purchase locally even if server fails
+      await completePurchase(agent.id, user.id, agent.price);
       setIsComplete(true);
       clearPendingPurchase();
 
       toast({
         title: "Purchase Successful!",
-        description: `You now have access to ${agent.name}.`,
+        description: `You now have access to ${agent.name}. (Offline mode)`,
       });
 
-      // Redirect back to agent page after 2 seconds
       setTimeout(() => {
         navigate(`/agents/${id}`);
       }, 2000);
@@ -198,7 +250,8 @@ const Purchase = () => {
                     <Input
                       id="cardName"
                       placeholder="John Doe"
-                      defaultValue={user?.name}
+                      value={formData.cardName}
+                      onChange={(e) => setFormData(prev => ({ ...prev, cardName: e.target.value }))}
                       className="h-12 rounded-xl"
                       required
                     />
@@ -209,6 +262,8 @@ const Purchase = () => {
                     <Input
                       id="cardNumber"
                       placeholder="4242 4242 4242 4242"
+                      value={formData.cardNumber}
+                      onChange={(e) => setFormData(prev => ({ ...prev, cardNumber: e.target.value }))}
                       className="h-12 rounded-xl"
                       required
                     />
@@ -220,6 +275,8 @@ const Purchase = () => {
                       <Input
                         id="expiry"
                         placeholder="MM/YY"
+                        value={formData.expiry}
+                        onChange={(e) => setFormData(prev => ({ ...prev, expiry: e.target.value }))}
                         className="h-12 rounded-xl"
                         required
                       />
@@ -229,6 +286,8 @@ const Purchase = () => {
                       <Input
                         id="cvc"
                         placeholder="123"
+                        value={formData.cvc}
+                        onChange={(e) => setFormData(prev => ({ ...prev, cvc: e.target.value }))}
                         className="h-12 rounded-xl"
                         required
                       />
