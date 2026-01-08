@@ -1,11 +1,9 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { motion } from "framer-motion";
 import { 
   Send, 
   Play, 
-  Pause, 
-  Settings, 
-  RefreshCw, 
+  Pause,
   Terminal, 
   Lock,
   Eye,
@@ -15,17 +13,40 @@ import {
   Loader2,
   CheckCircle,
   XCircle,
-  Clock
+  Clock,
+  Upload,
+  FileText,
+  Image as ImageIcon,
+  X,
+  Settings,
+  Cpu,
+  Zap
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { useAgentConfigStore, encryptData, decryptData } from "@/stores/agentConfigStore";
+import { 
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { useAgentConfigStore, encryptData } from "@/stores/agentConfigStore";
 import { useToast } from "@/hooks/use-toast";
+import { 
+  executeAgent, 
+  getDefaultProvider, 
+  getAvailableProviders,
+  validateExecutionInput,
+  getExecutionStatus,
+  type LLMProvider,
+  type AgentExecutionOutput
+} from "@/services/agentRuntime";
+import { downloadOutput, formatBytes, type AgentOutput } from "@/services/outputExtractor";
+import { handleAgentError } from "@/services/errorHandler";
+import { getAgentRole } from "@/data/agentRoles";
 import type { Agent } from "@/components/marketplace/AgentCard";
-
-const API_BASE_URL = 'http://127.0.0.1:8000';
 
 interface AgentWorkspaceProps {
   agent: Agent;
@@ -35,188 +56,180 @@ interface AgentWorkspaceProps {
 
 interface Message {
   id: string;
-  type: 'input' | 'output' | 'system';
+  type: 'input' | 'output' | 'system' | 'error';
   content: string;
   encrypted: string;
   timestamp: string;
   status?: 'pending' | 'success' | 'error';
+  outputs?: AgentOutput[];
+  executionTime?: number;
+  tokensUsed?: number;
+  provider?: LLMProvider;
+  files?: { name: string; size: number }[];
 }
 
-export const AgentWorkspace = ({ agent, userId, serverUrl }: AgentWorkspaceProps) => {
+export const AgentWorkspace = ({ agent, userId }: AgentWorkspaceProps) => {
   const { toast } = useToast();
-  const { getSession, startSession, addInput, addOutput, updateSessionStatus, updateMetrics } = useAgentConfigStore();
+  const { getSession, startSession, addInput, addOutput } = useAgentConfigStore();
   
   const [isRunning, setIsRunning] = useState(true);
   const [inputValue, setInputValue] = useState('');
   const [messages, setMessages] = useState<Message[]>([]);
   const [showEncrypted, setShowEncrypted] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [processingStatus, setProcessingStatus] = useState('');
+  const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
+  const [provider, setProvider] = useState<LLMProvider>(getDefaultProvider());
   const [metrics, setMetrics] = useState({
     totalRequests: 0,
     successfulRequests: 0,
     failedRequests: 0,
     avgResponseTime: 0,
+    totalTokens: 0,
   });
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const session = getSession(agent.id, userId);
+  const agentRole = getAgentRole(agent.id);
+  const availableProviders = getAvailableProviders();
 
   useEffect(() => {
-    // Start or resume session
-    const currentSession = startSession(agent.id, userId);
-    
-    // Load existing messages from session
-    if (currentSession.inputHistory.length > 0 || currentSession.outputHistory.length > 0) {
-      const existingMessages: Message[] = [];
-      
-      currentSession.inputHistory.forEach(item => {
-        existingMessages.push({
-          id: `in-${item.timestamp}`,
-          type: 'input',
-          content: item.input,
-          encrypted: item.encrypted,
-          timestamp: item.timestamp,
-          status: 'success',
-        });
-      });
-      
-      currentSession.outputHistory.forEach(item => {
-        existingMessages.push({
-          id: `out-${item.timestamp}`,
-          type: 'output',
-          content: item.output,
-          encrypted: item.encrypted,
-          timestamp: item.timestamp,
-          status: 'success',
-        });
-      });
-      
-      // Sort by timestamp
-      existingMessages.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
-      setMessages(existingMessages);
-      setMetrics(currentSession.metrics);
-    }
+    startSession(agent.id, userId);
     
     // Add system message
-    setMessages(prev => [
-      {
-        id: 'system-init',
-        type: 'system',
-        content: `Connected to ${agent.name}. Agent is ready to receive requests.`,
-        encrypted: encryptData(`Connected to ${agent.name}`),
-        timestamp: new Date().toISOString(),
-      },
-      ...prev.filter(m => m.id !== 'system-init'),
-    ]);
-  }, [agent.id, userId]);
+    const providerStatus = availableProviders.gemini || availableProviders.openai 
+      ? `Using ${provider === 'gemini' ? 'Google Gemini' : 'OpenAI GPT-4'}`
+      : '⚠️ No API keys configured';
+    
+    setMessages([{
+      id: 'system-init',
+      type: 'system',
+      content: `🚀 ${agent.name} is ready. ${providerStatus}. Upload files or type your request.`,
+      encrypted: encryptData(`Connected to ${agent.name}`),
+      timestamp: new Date().toISOString(),
+    }]);
+  }, [agent.id, userId, agent.name, provider]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  const sendToAgent = async (input: string): Promise<string> => {
-    const startTime = Date.now();
+  const handleFileUpload = useCallback((files: FileList | null) => {
+    if (!files) return;
     
-    try {
-      const response = await fetch(`${API_BASE_URL}/api/agents/${agent.id}/process`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          user_id: userId,
-          input: input,
-          session_id: session?.sessionId,
-        }),
-      });
-      
-      if (response.ok) {
-        const data = await response.json();
-        const responseTime = Date.now() - startTime;
-        
-        // Update metrics
-        const newTotal = metrics.totalRequests + 1;
-        const newAvg = ((metrics.avgResponseTime * metrics.totalRequests) + responseTime) / newTotal;
-        
-        setMetrics(prev => ({
-          ...prev,
-          totalRequests: newTotal,
-          successfulRequests: prev.successfulRequests + 1,
-          avgResponseTime: Math.round(newAvg),
-        }));
-        
-        return data.response || data.output || 'Response received';
+    const newFiles = Array.from(files);
+    const validFiles: File[] = [];
+    const errors: string[] = [];
+    
+    for (const file of newFiles) {
+      // Check file size (max 10MB)
+      if (file.size > 10 * 1024 * 1024) {
+        errors.push(`${file.name} is too large (max 10MB)`);
+        continue;
       }
       
-      throw new Error('Failed to process request');
-    } catch (error) {
-      // Simulate response for demo when server is not available
-      const responseTime = Date.now() - startTime;
-      const newTotal = metrics.totalRequests + 1;
+      // Check if file type is supported
+      const ext = file.name.split('.').pop()?.toLowerCase() || '';
+      const isImage = file.type.startsWith('image/');
+      const supportedExts = agentRole?.fileTypes || [];
       
-      setMetrics(prev => ({
-        ...prev,
-        totalRequests: newTotal,
-        successfulRequests: prev.successfulRequests + 1,
-        avgResponseTime: Math.round(((prev.avgResponseTime * prev.totalRequests) + responseTime + 500) / newTotal),
-      }));
+      if (!isImage && !supportedExts.includes(ext)) {
+        errors.push(`${file.name} is not supported. Supported: ${supportedExts.join(', ')}`);
+        continue;
+      }
       
-      // Generate simulated response based on agent type
-      return generateSimulatedResponse(agent.category, input);
+      validFiles.push(file);
     }
+    
+    if (errors.length > 0) {
+      toast({
+        title: "Some files skipped",
+        description: errors.join('\n'),
+        variant: "destructive",
+      });
+    }
+    
+    if (validFiles.length > 0) {
+      setUploadedFiles(prev => [...prev, ...validFiles]);
+      toast({
+        title: "Files added",
+        description: `${validFiles.length} file(s) ready for processing`,
+      });
+    }
+  }, [agentRole, toast]);
+
+  const removeFile = (index: number) => {
+    setUploadedFiles(prev => prev.filter((_, i) => i !== index));
   };
 
-  const generateSimulatedResponse = (category: string, input: string): string => {
-    const responses: Record<string, string[]> = {
-      'Sales': [
-        `Analyzing prospect data for: "${input}"\n\n📊 Found 15 high-intent leads matching your criteria.\n\n✅ Top 3 Prospects:\n1. Company A - Decision maker: John Smith (CEO)\n2. Company B - Budget confirmed: $50K+\n3. Company C - Active buying signals detected\n\n📧 Personalized outreach sequences generated.`,
-        `Processing sales query: "${input}"\n\n🎯 Lead Score Analysis Complete:\n- Hot leads: 8\n- Warm leads: 12\n- Cold leads: 5\n\n💡 Recommendation: Focus on the 8 hot leads first. Outreach templates ready.`,
-      ],
-      'Customer Service': [
-        `Analyzing customer inquiry: "${input}"\n\n✅ Issue Classification: Technical Support\n📋 Suggested Resolution:\n1. Check account settings\n2. Clear cache and cookies\n3. If issue persists, escalate to Tier 2\n\n📊 Similar issues resolved: 89%\n⏱️ Avg resolution time: 4 minutes`,
-      ],
-      'Analytics': [
-        `Processing data query: "${input}"\n\n📈 Analysis Results:\n- Trend: Upward (+15% MoM)\n- Key Insight: Peak activity on Tuesdays\n- Anomaly detected: Spike on March 15th\n\n📊 Visualization generated\n💡 Recommendation: Increase resource allocation on Tuesdays`,
-      ],
-      'Marketing': [
-        `Content analysis for: "${input}"\n\n✍️ Generated Content:\n- Blog post outline created\n- 5 social media posts drafted\n- Email sequence ready\n\n🎯 SEO Score: 85/100\n📊 Predicted engagement: High`,
-      ],
-      'Developer Tools': [
-        `Code review for: "${input}"\n\n🔍 Analysis Complete:\n- Issues found: 2 warnings, 0 errors\n- Security: No vulnerabilities detected\n- Performance: Optimizations suggested\n\n✅ Recommendations:\n1. Add error handling on line 45\n2. Consider async/await pattern`,
-      ],
-      'Human Resources': [
-        `HR analysis for: "${input}"\n\n👥 Results:\n- 12 candidates screened\n- 5 match requirements (85%+)\n- 3 scheduled for interviews\n\n📋 Top candidate: Jane Doe\n- Experience: 5 years\n- Skills match: 92%`,
-      ],
-    };
-    
-    const categoryResponses = responses[category] || [
-      `Processing request: "${input}"\n\n✅ Task completed successfully.\n📊 Results generated.\n💡 Ready for next action.`
-    ];
-    
-    return categoryResponses[Math.floor(Math.random() * categoryResponses.length)];
-  };
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    handleFileUpload(e.dataTransfer.files);
+  }, [handleFileUpload]);
 
-  const handleSend = async () => {
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+  }, []);
+
+  const handleExecute = async () => {
     if (!inputValue.trim() || !isRunning || isProcessing) return;
     
-    const input = inputValue.trim();
+    const userPrompt = inputValue.trim();
     setInputValue('');
     setIsProcessing(true);
+    
+    // Validate input
+    const validationErrors = validateExecutionInput({
+      agentId: agent.id,
+      userPrompt,
+      files: uploadedFiles,
+      provider
+    });
+    
+    if (validationErrors.length > 0) {
+      toast({
+        title: "Validation Error",
+        description: validationErrors.join('\n'),
+        variant: "destructive",
+      });
+      setIsProcessing(false);
+      return;
+    }
     
     // Add input message
     const inputMessage: Message = {
       id: `in-${Date.now()}`,
       type: 'input',
-      content: input,
-      encrypted: encryptData(input),
+      content: userPrompt,
+      encrypted: encryptData(userPrompt),
       timestamp: new Date().toISOString(),
       status: 'pending',
+      files: uploadedFiles.map(f => ({ name: f.name, size: f.size })),
     };
     
     setMessages(prev => [...prev, inputMessage]);
-    addInput(session?.sessionId || '', input);
+    addInput(session?.sessionId || '', userPrompt);
     
     try {
-      // Send to agent
-      const response = await sendToAgent(input);
+      // Update status
+      setProcessingStatus(getExecutionStatus(provider, 'processing_files'));
+      
+      if (uploadedFiles.some(f => f.type.startsWith('image/'))) {
+        setProcessingStatus(getExecutionStatus(provider, 'processing_images'));
+      }
+      
+      setProcessingStatus(getExecutionStatus(provider, 'calling_api'));
+      
+      // Execute agent
+      const result: AgentExecutionOutput = await executeAgent({
+        agentId: agent.id,
+        userPrompt,
+        files: uploadedFiles,
+        provider
+      });
+      
+      setProcessingStatus(getExecutionStatus(provider, 'extracting_outputs'));
       
       // Update input status
       setMessages(prev => prev.map(m => 
@@ -227,38 +240,92 @@ export const AgentWorkspace = ({ agent, userId, serverUrl }: AgentWorkspaceProps
       const outputMessage: Message = {
         id: `out-${Date.now()}`,
         type: 'output',
-        content: response,
-        encrypted: encryptData(response),
+        content: result.message,
+        encrypted: encryptData(result.message),
         timestamp: new Date().toISOString(),
         status: 'success',
+        outputs: result.outputs,
+        executionTime: result.executionTime,
+        tokensUsed: result.tokensUsed,
+        provider: result.provider,
       };
       
       setMessages(prev => [...prev, outputMessage]);
-      addOutput(session?.sessionId || '', response);
+      addOutput(session?.sessionId || '', result.message);
+      
+      // Update metrics
+      setMetrics(prev => {
+        const newTotal = prev.totalRequests + 1;
+        const newAvg = ((prev.avgResponseTime * prev.totalRequests) + result.executionTime) / newTotal;
+        return {
+          totalRequests: newTotal,
+          successfulRequests: prev.successfulRequests + 1,
+          failedRequests: prev.failedRequests,
+          avgResponseTime: Math.round(newAvg),
+          totalTokens: prev.totalTokens + (result.tokensUsed || 0),
+        };
+      });
+      
+      // Clear uploaded files after successful execution
+      setUploadedFiles([]);
+      
+      setProcessingStatus(getExecutionStatus(provider, 'complete'));
       
     } catch (error) {
+      console.error('Agent execution error:', error);
+      
       setMessages(prev => prev.map(m => 
         m.id === inputMessage.id ? { ...m, status: 'error' as const } : m
       ));
       
-      toast({
-        title: "Error",
-        description: "Failed to process request",
-        variant: "destructive",
-      });
+      // Add error message
+      const errorMessage = handleAgentError(error, { provider, agentId: agent.id });
+      
+      setMessages(prev => [...prev, {
+        id: `err-${Date.now()}`,
+        type: 'error',
+        content: errorMessage,
+        encrypted: encryptData(errorMessage),
+        timestamp: new Date().toISOString(),
+      }]);
+      
+      setMetrics(prev => ({
+        ...prev,
+        totalRequests: prev.totalRequests + 1,
+        failedRequests: prev.failedRequests + 1,
+      }));
+      
+      setProcessingStatus(getExecutionStatus(provider, 'error'));
+      
     } finally {
       setIsProcessing(false);
+      setTimeout(() => setProcessingStatus(''), 3000);
+    }
+  };
+
+  const handleDownload = (output: AgentOutput) => {
+    try {
+      downloadOutput(output);
+      toast({
+        title: "Download started",
+        description: `Downloading ${output.filename}`,
+      });
+    } catch (error) {
+      toast({
+        title: "Download failed",
+        description: error instanceof Error ? error.message : "Unknown error",
+        variant: "destructive",
+      });
     }
   };
 
   const toggleAgent = () => {
     setIsRunning(!isRunning);
-    updateSessionStatus(session?.sessionId || '', isRunning ? 'paused' : 'active');
     
     setMessages(prev => [...prev, {
       id: `system-${Date.now()}`,
       type: 'system',
-      content: isRunning ? 'Agent paused' : 'Agent resumed',
+      content: isRunning ? '⏸️ Agent paused' : '▶️ Agent resumed',
       encrypted: encryptData(isRunning ? 'Agent paused' : 'Agent resumed'),
       timestamp: new Date().toISOString(),
     }]);
@@ -273,10 +340,11 @@ export const AgentWorkspace = ({ agent, userId, serverUrl }: AgentWorkspaceProps
     setMessages([{
       id: 'system-clear',
       type: 'system',
-      content: 'Conversation cleared',
+      content: '🗑️ Conversation cleared',
       encrypted: encryptData('Conversation cleared'),
       timestamp: new Date().toISOString(),
     }]);
+    setUploadedFiles([]);
   };
 
   const exportData = () => {
@@ -286,8 +354,9 @@ export const AgentWorkspace = ({ agent, userId, serverUrl }: AgentWorkspaceProps
       messages: messages.map(m => ({
         type: m.type,
         timestamp: m.timestamp,
-        encrypted: m.encrypted, // Export encrypted data only
+        encrypted: m.encrypted,
       })),
+      metrics,
     };
     
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
@@ -296,10 +365,11 @@ export const AgentWorkspace = ({ agent, userId, serverUrl }: AgentWorkspaceProps
     a.href = url;
     a.download = `${agent.id}-export-${Date.now()}.json`;
     a.click();
+    URL.revokeObjectURL(url);
     
     toast({
       title: "Exported",
-      description: "Data exported with encryption",
+      description: "Session data exported with encryption",
     });
   };
 
@@ -314,9 +384,35 @@ export const AgentWorkspace = ({ agent, userId, serverUrl }: AgentWorkspaceProps
             <Lock className="w-3 h-3" />
             Encrypted
           </Badge>
+          {processingStatus && (
+            <Badge variant="secondary" className="gap-1">
+              <Loader2 className="w-3 h-3 animate-spin" />
+              {processingStatus}
+            </Badge>
+          )}
         </div>
         
         <div className="flex items-center gap-2">
+          {/* Provider Selector */}
+          <Select value={provider} onValueChange={(v) => setProvider(v as LLMProvider)}>
+            <SelectTrigger className="w-[140px] h-8">
+              <Cpu className="w-3 h-3 mr-1" />
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="gemini" disabled={!availableProviders.gemini}>
+                <span className={!availableProviders.gemini ? 'opacity-50' : ''}>
+                  Gemini {!availableProviders.gemini && '(No key)'}
+                </span>
+              </SelectItem>
+              <SelectItem value="openai" disabled={!availableProviders.openai}>
+                <span className={!availableProviders.openai ? 'opacity-50' : ''}>
+                  OpenAI {!availableProviders.openai && '(No key)'}
+                </span>
+              </SelectItem>
+            </SelectContent>
+          </Select>
+          
           <Button variant="outline" size="sm" onClick={() => setShowEncrypted(!showEncrypted)}>
             {showEncrypted ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
           </Button>
@@ -337,12 +433,13 @@ export const AgentWorkspace = ({ agent, userId, serverUrl }: AgentWorkspaceProps
       </div>
 
       {/* Metrics */}
-      <div className="grid grid-cols-4 gap-4">
+      <div className="grid grid-cols-5 gap-4">
         {[
           { label: 'Total Requests', value: metrics.totalRequests, icon: Terminal },
           { label: 'Successful', value: metrics.successfulRequests, icon: CheckCircle },
           { label: 'Failed', value: metrics.failedRequests, icon: XCircle },
           { label: 'Avg Response', value: `${metrics.avgResponseTime}ms`, icon: Clock },
+          { label: 'Tokens Used', value: metrics.totalTokens.toLocaleString(), icon: Zap },
         ].map((stat) => (
           <div key={stat.label} className="glass-card rounded-xl p-4 border border-border/50">
             <div className="flex items-center gap-2 mb-1">
@@ -352,6 +449,74 @@ export const AgentWorkspace = ({ agent, userId, serverUrl }: AgentWorkspaceProps
             <p className="text-xl font-bold">{stat.value}</p>
           </div>
         ))}
+      </div>
+
+      {/* File Upload Area */}
+      <div 
+        className="glass-card rounded-2xl border border-dashed border-border/50 p-4 transition-colors hover:border-primary/50"
+        onDrop={handleDrop}
+        onDragOver={handleDragOver}
+      >
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          className="hidden"
+          onChange={(e) => handleFileUpload(e.target.files)}
+          accept={agentRole?.fileTypes.map(t => `.${t}`).join(',') + ',image/*'}
+        />
+        
+        {uploadedFiles.length === 0 ? (
+          <div 
+            className="flex flex-col items-center justify-center py-6 cursor-pointer"
+            onClick={() => fileInputRef.current?.click()}
+          >
+            <Upload className="w-10 h-10 text-muted-foreground mb-2" />
+            <p className="text-sm text-muted-foreground">
+              Drag & drop files here or click to upload
+            </p>
+            <p className="text-xs text-muted-foreground mt-1">
+              Supported: {agentRole?.fileTypes.join(', ')}, images
+            </p>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-sm font-medium">{uploadedFiles.length} file(s) ready</span>
+              <Button 
+                variant="outline" 
+                size="sm"
+                onClick={() => fileInputRef.current?.click()}
+              >
+                Add More
+              </Button>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {uploadedFiles.map((file, index) => (
+                <div 
+                  key={index}
+                  className="flex items-center gap-2 bg-muted/50 rounded-lg px-3 py-2"
+                >
+                  {file.type.startsWith('image/') ? (
+                    <ImageIcon className="w-4 h-4 text-primary" />
+                  ) : (
+                    <FileText className="w-4 h-4 text-primary" />
+                  )}
+                  <span className="text-sm truncate max-w-[150px]">{file.name}</span>
+                  <span className="text-xs text-muted-foreground">
+                    ({formatBytes(file.size)})
+                  </span>
+                  <button 
+                    onClick={() => removeFile(index)}
+                    className="text-muted-foreground hover:text-destructive"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Chat Interface */}
@@ -366,7 +531,7 @@ export const AgentWorkspace = ({ agent, userId, serverUrl }: AgentWorkspaceProps
           </span>
         </div>
         
-        <div className="h-96 overflow-y-auto p-4 space-y-4 bg-black/30">
+        <div className="h-[500px] overflow-y-auto p-4 space-y-4 bg-black/30">
           {messages.map((message) => (
             <motion.div
               key={message.id}
@@ -374,12 +539,14 @@ export const AgentWorkspace = ({ agent, userId, serverUrl }: AgentWorkspaceProps
               animate={{ opacity: 1, y: 0 }}
               className={`flex ${message.type === 'input' ? 'justify-end' : 'justify-start'}`}
             >
-              <div className={`max-w-[80%] rounded-xl p-4 ${
+              <div className={`max-w-[85%] rounded-xl p-4 ${
                 message.type === 'input'
                   ? 'bg-primary text-primary-foreground'
                   : message.type === 'system'
                     ? 'bg-muted/50 text-muted-foreground text-sm italic'
-                    : 'bg-muted/30 border border-border/50'
+                    : message.type === 'error'
+                      ? 'bg-destructive/20 border border-destructive/50 text-destructive'
+                      : 'bg-muted/30 border border-border/50'
               }`}>
                 <div className="flex items-start gap-2">
                   {message.status === 'pending' && (
@@ -388,10 +555,67 @@ export const AgentWorkspace = ({ agent, userId, serverUrl }: AgentWorkspaceProps
                   {message.status === 'success' && message.type === 'input' && (
                     <CheckCircle className="w-4 h-4 text-green-300 flex-shrink-0 mt-1" />
                   )}
-                  <div className="flex-1">
-                    <pre className="whitespace-pre-wrap font-mono text-sm">
+                  {message.status === 'error' && (
+                    <XCircle className="w-4 h-4 text-destructive flex-shrink-0 mt-1" />
+                  )}
+                  <div className="flex-1 min-w-0">
+                    {/* Show attached files for input messages */}
+                    {message.files && message.files.length > 0 && (
+                      <div className="flex flex-wrap gap-1 mb-2">
+                        {message.files.map((f, i) => (
+                          <Badge key={i} variant="secondary" className="text-xs">
+                            📎 {f.name}
+                          </Badge>
+                        ))}
+                      </div>
+                    )}
+                    
+                    <pre className="whitespace-pre-wrap font-mono text-sm break-words">
                       {showEncrypted ? message.encrypted : message.content}
                     </pre>
+                    
+                    {/* Execution info */}
+                    {message.type === 'output' && (message.executionTime || message.tokensUsed) && (
+                      <div className="flex items-center gap-3 mt-2 text-xs text-muted-foreground">
+                        {message.executionTime && (
+                          <span>⏱️ {message.executionTime}ms</span>
+                        )}
+                        {message.tokensUsed && (
+                          <span>📊 {message.tokensUsed.toLocaleString()} tokens</span>
+                        )}
+                        {message.provider && (
+                          <Badge variant="outline" className="text-xs">
+                            {message.provider === 'gemini' ? '🔷 Gemini' : '🟢 OpenAI'}
+                          </Badge>
+                        )}
+                      </div>
+                    )}
+                    
+                    {/* Download buttons for outputs */}
+                    {message.outputs && message.outputs.length > 0 && (
+                      <div className="mt-3 space-y-2">
+                        <p className="text-xs font-medium text-muted-foreground">
+                          📥 Deliverables ({message.outputs.length}):
+                        </p>
+                        <div className="flex flex-wrap gap-2">
+                          {message.outputs.map((output, index) => (
+                            <Button
+                              key={index}
+                              variant="secondary"
+                              size="sm"
+                              onClick={() => handleDownload(output)}
+                              className="gap-2"
+                            >
+                              <Download className="w-3 h-3" />
+                              {output.filename}
+                              <span className="text-xs opacity-70">
+                                ({formatBytes(output.size)})
+                              </span>
+                            </Button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
                 <p className="text-xs opacity-60 mt-2">
@@ -405,25 +629,37 @@ export const AgentWorkspace = ({ agent, userId, serverUrl }: AgentWorkspaceProps
         
         <div className="p-4 border-t border-border/50">
           <div className="flex gap-2">
-            <Input
+            <Textarea
               value={inputValue}
               onChange={(e) => setInputValue(e.target.value)}
-              onKeyPress={(e) => e.key === 'Enter' && handleSend()}
-              placeholder={isRunning ? "Type your request..." : "Agent is paused"}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  handleExecute();
+                }
+              }}
+              placeholder={isRunning ? "Describe what you want the agent to do..." : "Agent is paused"}
               disabled={!isRunning || isProcessing}
-              className="bg-muted/30 border-border/50"
+              className="bg-muted/30 border-border/50 min-h-[60px] resize-none"
+              rows={2}
             />
             <Button 
-              onClick={handleSend} 
+              onClick={handleExecute} 
               disabled={!isRunning || isProcessing || !inputValue.trim()}
+              className="h-auto px-6"
             >
               {isProcessing ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
+                <Loader2 className="w-5 h-5 animate-spin" />
               ) : (
-                <Send className="w-4 h-4" />
+                <Send className="w-5 h-5" />
               )}
             </Button>
           </div>
+          {uploadedFiles.length > 0 && (
+            <p className="text-xs text-muted-foreground mt-2">
+              {uploadedFiles.length} file(s) will be processed with your request
+            </p>
+          )}
         </div>
       </div>
     </div>
