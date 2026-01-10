@@ -1,6 +1,7 @@
 import { GoogleGenerativeAI, GenerativeModel, Part } from '@google/generative-ai';
 import { AgentRole } from '@/data/agentRoles';
 import { extractOutputsFromResponse, getCleanMessage, AgentOutput } from '@/services/outputExtractor';
+import { getGeminiApiKey } from '@/stores/apiKeyStore';
 
 export interface GeminiExecutionResult {
   message: string;
@@ -10,14 +11,18 @@ export interface GeminiExecutionResult {
 }
 
 let genAI: GoogleGenerativeAI | null = null;
+let lastApiKey: string = '';
 
 function getClient(): GoogleGenerativeAI {
-  if (!genAI) {
-    const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
+  const apiKey = getGeminiApiKey();
+  
+  // Recreate client if API key changed
+  if (!genAI || apiKey !== lastApiKey) {
     if (!apiKey) {
-      throw new Error('VITE_GEMINI_API_KEY is not configured. Please add your Gemini API key.');
+      throw new Error('Gemini API key is not configured. Please add your API key in Settings.');
     }
     genAI = new GoogleGenerativeAI(apiKey);
+    lastApiKey = apiKey;
   }
   return genAI;
 }
@@ -101,7 +106,7 @@ export async function executeWithGemini(
 }
 
 export function checkGeminiApiKey(): boolean {
-  const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
+  const apiKey = getGeminiApiKey();
   return !!apiKey && apiKey.length > 10 && apiKey !== 'your_gemini_api_key_here';
 }
 
