@@ -20,7 +20,9 @@ import {
   X,
   Settings,
   Cpu,
-  Zap
+  Zap,
+  Database,
+  Key
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -32,7 +34,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { useAgentConfigStore, encryptData } from "@/stores/agentConfigStore";
+import { 
+  useAgentConfigStore, 
+  encryptData,
+  type StoredMessage,
+  type StoredFileData 
+} from "@/stores/agentConfigStore";
 import { useToast } from "@/hooks/use-toast";
 import { 
   executeAgent, 
@@ -46,6 +53,8 @@ import {
 import { downloadOutput, formatBytes, type AgentOutput } from "@/services/outputExtractor";
 import { handleAgentError } from "@/services/errorHandler";
 import { getAgentRole } from "@/data/agentRoles";
+import { processFiles, processImages } from "@/services/fileProcessor";
+import { ApiKeySettings } from "@/components/settings/ApiKeySettings";
 import type { Agent } from "@/components/marketplace/AgentCard";
 
 interface AgentWorkspaceProps {
@@ -54,27 +63,24 @@ interface AgentWorkspaceProps {
   serverUrl: string;
 }
 
-interface Message {
-  id: string;
-  type: 'input' | 'output' | 'system' | 'error';
-  content: string;
-  encrypted: string;
-  timestamp: string;
-  status?: 'pending' | 'success' | 'error';
-  outputs?: AgentOutput[];
-  executionTime?: number;
-  tokensUsed?: number;
-  provider?: LLMProvider;
-  files?: { name: string; size: number }[];
-}
-
 export const AgentWorkspace = ({ agent, userId }: AgentWorkspaceProps) => {
   const { toast } = useToast();
-  const { getSession, startSession, addInput, addOutput } = useAgentConfigStore();
+  const { 
+    getSession, 
+    startSession, 
+    addInput, 
+    addOutput,
+    addMessage,
+    getMessages,
+    clearMessages: clearStoredMessages,
+    storeFileData,
+    getStoredFiles,
+    clearStoredFiles
+  } = useAgentConfigStore();
   
   const [isRunning, setIsRunning] = useState(true);
   const [inputValue, setInputValue] = useState('');
-  const [messages, setMessages] = useState<Message[]>([]);
+  const [messages, setMessages] = useState<StoredMessage[]>([]);
   const [showEncrypted, setShowEncrypted] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [processingStatus, setProcessingStatus] = useState('');
@@ -90,32 +96,72 @@ export const AgentWorkspace = ({ agent, userId }: AgentWorkspaceProps) => {
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const session = getSession(agent.id, userId);
+  const sessionRef = useRef<ReturnType<typeof getSession>>(null);
   const agentRole = getAgentRole(agent.id);
   const availableProviders = getAvailableProviders();
 
+  // Initialize session and load persisted data
   useEffect(() => {
-    startSession(agent.id, userId);
+    const session = startSession(agent.id, userId);
+    sessionRef.current = session;
     
-    // Add system message
-    const providerStatus = availableProviders.gemini || availableProviders.openai 
-      ? `Using ${provider === 'gemini' ? 'Google Gemini' : 'OpenAI GPT-4'}`
-      : '⚠️ No API keys configured';
+    // Load persisted messages
+    const storedMessages = getMessages(session.sessionId);
     
-    setMessages([{
-      id: 'system-init',
-      type: 'system',
-      content: `🚀 ${agent.name} is ready. ${providerStatus}. Upload files or type your request.`,
-      encrypted: encryptData(`Connected to ${agent.name}`),
-      timestamp: new Date().toISOString(),
-    }]);
-  }, [agent.id, userId, agent.name, provider]);
+    if (storedMessages.length > 0) {
+      setMessages(storedMessages);
+      
+      // Restore metrics from stored messages
+      const outputMessages = storedMessages.filter(m => m.type === 'output');
+      const errorMessages = storedMessages.filter(m => m.type === 'error');
+      const totalTime = outputMessages.reduce((acc, m) => acc + (m.executionTime || 0), 0);
+      const totalTokens = outputMessages.reduce((acc, m) => acc + (m.tokensUsed || 0), 0);
+      
+      setMetrics({
+        totalRequests: outputMessages.length + errorMessages.length,
+        successfulRequests: outputMessages.length,
+        failedRequests: errorMessages.length,
+        avgResponseTime: outputMessages.length > 0 ? Math.round(totalTime / outputMessages.length) : 0,
+        totalTokens,
+      });
+      
+      toast({
+        title: "Session Restored",
+        description: `Loaded ${storedMessages.length} messages from previous session`,
+      });
+    } else {
+      // Add initial system message
+      const providerStatus = availableProviders.gemini || availableProviders.openai 
+        ? `Using ${provider === 'gemini' ? 'Google Gemini' : 'OpenAI GPT-4'}`
+        : '⚠️ No API keys configured - click the key icon to add them';
+      
+      const systemMessage: StoredMessage = {
+        id: 'system-init',
+        type: 'system',
+        content: `🚀 ${agent.name} is ready. ${providerStatus}. Upload files or type your request.`,
+        encrypted: encryptData(`Connected to ${agent.name}`),
+        timestamp: new Date().toISOString(),
+      };
+      
+      setMessages([systemMessage]);
+      addMessage(session.sessionId, systemMessage);
+    }
+    
+    // Load stored files info
+    const storedFiles = getStoredFiles(session.sessionId);
+    if (storedFiles.length > 0) {
+      toast({
+        title: "Data Restored",
+        description: `${storedFiles.length} file(s) from previous session available`,
+      });
+    }
+  }, [agent.id, userId, agent.name]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  const handleFileUpload = useCallback((files: FileList | null) => {
+  const handleFileUpload = useCallback(async (files: FileList | null) => {
     if (!files) return;
     
     const newFiles = Array.from(files);
@@ -152,12 +198,48 @@ export const AgentWorkspace = ({ agent, userId }: AgentWorkspaceProps) => {
     
     if (validFiles.length > 0) {
       setUploadedFiles(prev => [...prev, ...validFiles]);
+      
+      // Process and store file data for persistence
+      const session = sessionRef.current;
+      if (session) {
+        for (const file of validFiles) {
+          try {
+            let processedContent = '';
+            let base64Data: string | undefined;
+            
+            if (file.type.startsWith('image/')) {
+              // Store image as base64
+              const imageData = await processImages([file]);
+              base64Data = imageData[0];
+              processedContent = `[Image: ${file.name}]`;
+            } else {
+              // Process and extract text content
+              processedContent = await processFiles([file]);
+            }
+            
+            const storedFile: StoredFileData = {
+              id: `file_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+              name: file.name,
+              size: file.size,
+              type: file.type,
+              processedContent,
+              base64Data,
+              uploadedAt: new Date().toISOString(),
+            };
+            
+            storeFileData(session.sessionId, storedFile);
+          } catch (error) {
+            console.error('Error processing file for storage:', error);
+          }
+        }
+      }
+      
       toast({
         title: "Files added",
-        description: `${validFiles.length} file(s) ready for processing`,
+        description: `${validFiles.length} file(s) ready for processing and stored for session`,
       });
     }
-  }, [agentRole, toast]);
+  }, [agentRole, toast, storeFileData]);
 
   const removeFile = (index: number) => {
     setUploadedFiles(prev => prev.filter((_, i) => i !== index));
@@ -172,12 +254,41 @@ export const AgentWorkspace = ({ agent, userId }: AgentWorkspaceProps) => {
     e.preventDefault();
   }, []);
 
+  // Build context from stored files for LLM
+  const buildStoredFileContext = (): string => {
+    const session = sessionRef.current;
+    if (!session) return '';
+    
+    const storedFiles = getStoredFiles(session.sessionId);
+    if (storedFiles.length === 0) return '';
+    
+    const fileContexts = storedFiles
+      .filter(f => f.processedContent && !f.type.startsWith('image/'))
+      .map(f => `### Previously Uploaded: ${f.name}\n${f.processedContent}`)
+      .join('\n\n---\n\n');
+    
+    return fileContexts ? `\n\n## PREVIOUSLY UPLOADED DATA (CONTEXT):\n${fileContexts}` : '';
+  };
+
+  // Get stored images for context
+  const getStoredImages = (): string[] => {
+    const session = sessionRef.current;
+    if (!session) return [];
+    
+    const storedFiles = getStoredFiles(session.sessionId);
+    return storedFiles
+      .filter(f => f.type.startsWith('image/') && f.base64Data)
+      .map(f => f.base64Data!);
+  };
+
   const handleExecute = async () => {
     if (!inputValue.trim() || !isRunning || isProcessing) return;
     
     const userPrompt = inputValue.trim();
     setInputValue('');
     setIsProcessing(true);
+    
+    const session = sessionRef.current;
     
     // Validate input
     const validationErrors = validateExecutionInput({
@@ -198,7 +309,7 @@ export const AgentWorkspace = ({ agent, userId }: AgentWorkspaceProps) => {
     }
     
     // Add input message
-    const inputMessage: Message = {
+    const inputMessage: StoredMessage = {
       id: `in-${Date.now()}`,
       type: 'input',
       content: userPrompt,
@@ -209,7 +320,10 @@ export const AgentWorkspace = ({ agent, userId }: AgentWorkspaceProps) => {
     };
     
     setMessages(prev => [...prev, inputMessage]);
-    addInput(session?.sessionId || '', userPrompt);
+    if (session) {
+      addMessage(session.sessionId, inputMessage);
+      addInput(session.sessionId, userPrompt);
+    }
     
     try {
       // Update status
@@ -221,11 +335,25 @@ export const AgentWorkspace = ({ agent, userId }: AgentWorkspaceProps) => {
       
       setProcessingStatus(getExecutionStatus(provider, 'calling_api'));
       
-      // Execute agent
+      // Build enhanced prompt with stored file context
+      const storedContext = buildStoredFileContext();
+      const enhancedPrompt = storedContext 
+        ? `${userPrompt}${storedContext}` 
+        : userPrompt;
+      
+      // Get stored images plus new uploads
+      const storedImages = getStoredImages();
+      const newImageFiles = uploadedFiles.filter(f => f.type.startsWith('image/'));
+      const allImages = newImageFiles.length > 0 
+        ? [...(await processImages(newImageFiles)), ...storedImages]
+        : storedImages;
+      
+      // Execute agent with enhanced context
       const result: AgentExecutionOutput = await executeAgent({
         agentId: agent.id,
-        userPrompt,
-        files: uploadedFiles,
+        userPrompt: enhancedPrompt,
+        files: uploadedFiles.filter(f => !f.type.startsWith('image/')), // Non-image files
+        images: allImages.length > 0 ? undefined : undefined, // Images handled via stored data
         provider
       });
       
@@ -237,7 +365,7 @@ export const AgentWorkspace = ({ agent, userId }: AgentWorkspaceProps) => {
       ));
       
       // Add output message
-      const outputMessage: Message = {
+      const outputMessage: StoredMessage = {
         id: `out-${Date.now()}`,
         type: 'output',
         content: result.message,
@@ -251,7 +379,10 @@ export const AgentWorkspace = ({ agent, userId }: AgentWorkspaceProps) => {
       };
       
       setMessages(prev => [...prev, outputMessage]);
-      addOutput(session?.sessionId || '', result.message);
+      if (session) {
+        addMessage(session.sessionId, outputMessage);
+        addOutput(session.sessionId, result.message);
+      }
       
       // Update metrics
       setMetrics(prev => {
@@ -266,7 +397,7 @@ export const AgentWorkspace = ({ agent, userId }: AgentWorkspaceProps) => {
         };
       });
       
-      // Clear uploaded files after successful execution
+      // Clear uploaded files after successful execution (they're now stored)
       setUploadedFiles([]);
       
       setProcessingStatus(getExecutionStatus(provider, 'complete'));
@@ -281,13 +412,18 @@ export const AgentWorkspace = ({ agent, userId }: AgentWorkspaceProps) => {
       // Add error message
       const errorMessage = handleAgentError(error, { provider, agentId: agent.id });
       
-      setMessages(prev => [...prev, {
+      const errorMsg: StoredMessage = {
         id: `err-${Date.now()}`,
         type: 'error',
         content: errorMessage,
         encrypted: encryptData(errorMessage),
         timestamp: new Date().toISOString(),
-      }]);
+      };
+      
+      setMessages(prev => [...prev, errorMsg]);
+      if (session) {
+        addMessage(session.sessionId, errorMsg);
+      }
       
       setMetrics(prev => ({
         ...prev,
@@ -322,13 +458,20 @@ export const AgentWorkspace = ({ agent, userId }: AgentWorkspaceProps) => {
   const toggleAgent = () => {
     setIsRunning(!isRunning);
     
-    setMessages(prev => [...prev, {
+    const systemMsg: StoredMessage = {
       id: `system-${Date.now()}`,
       type: 'system',
       content: isRunning ? '⏸️ Agent paused' : '▶️ Agent resumed',
       encrypted: encryptData(isRunning ? 'Agent paused' : 'Agent resumed'),
       timestamp: new Date().toISOString(),
-    }]);
+    };
+    
+    setMessages(prev => [...prev, systemMsg]);
+    
+    const session = sessionRef.current;
+    if (session) {
+      addMessage(session.sessionId, systemMsg);
+    }
     
     toast({
       title: isRunning ? "Agent Paused" : "Agent Running",
@@ -337,17 +480,42 @@ export const AgentWorkspace = ({ agent, userId }: AgentWorkspaceProps) => {
   };
 
   const clearMessages = () => {
-    setMessages([{
+    const session = sessionRef.current;
+    
+    const systemMsg: StoredMessage = {
       id: 'system-clear',
       type: 'system',
       content: '🗑️ Conversation cleared',
       encrypted: encryptData('Conversation cleared'),
       timestamp: new Date().toISOString(),
-    }]);
+    };
+    
+    setMessages([systemMsg]);
     setUploadedFiles([]);
+    setMetrics({
+      totalRequests: 0,
+      successfulRequests: 0,
+      failedRequests: 0,
+      avgResponseTime: 0,
+      totalTokens: 0,
+    });
+    
+    if (session) {
+      clearStoredMessages(session.sessionId);
+      clearStoredFiles(session.sessionId);
+      addMessage(session.sessionId, systemMsg);
+    }
+    
+    toast({
+      title: "Session Cleared",
+      description: "All messages and stored data have been cleared",
+    });
   };
 
   const exportData = () => {
+    const session = sessionRef.current;
+    const storedFiles = session ? getStoredFiles(session.sessionId) : [];
+    
     const data = {
       agent: agent.name,
       exportedAt: new Date().toISOString(),
@@ -355,6 +523,12 @@ export const AgentWorkspace = ({ agent, userId }: AgentWorkspaceProps) => {
         type: m.type,
         timestamp: m.timestamp,
         encrypted: m.encrypted,
+      })),
+      storedFiles: storedFiles.map(f => ({
+        name: f.name,
+        size: f.size,
+        type: f.type,
+        uploadedAt: f.uploadedAt,
       })),
       metrics,
     };
@@ -373,6 +547,11 @@ export const AgentWorkspace = ({ agent, userId }: AgentWorkspaceProps) => {
     });
   };
 
+  // Get stored files count for display
+  const storedFilesCount = sessionRef.current 
+    ? getStoredFiles(sessionRef.current.sessionId).length 
+    : 0;
+
   return (
     <div className="space-y-6">
       {/* Status Bar */}
@@ -384,6 +563,12 @@ export const AgentWorkspace = ({ agent, userId }: AgentWorkspaceProps) => {
             <Lock className="w-3 h-3" />
             Encrypted
           </Badge>
+          {storedFilesCount > 0 && (
+            <Badge variant="secondary" className="gap-1">
+              <Database className="w-3 h-3" />
+              {storedFilesCount} stored file(s)
+            </Badge>
+          )}
           {processingStatus && (
             <Badge variant="secondary" className="gap-1">
               <Loader2 className="w-3 h-3 animate-spin" />
@@ -393,6 +578,15 @@ export const AgentWorkspace = ({ agent, userId }: AgentWorkspaceProps) => {
         </div>
         
         <div className="flex items-center gap-2">
+          {/* API Key Settings */}
+          <ApiKeySettings 
+            trigger={
+              <Button variant="outline" size="sm" className="gap-1">
+                <Key className="w-4 h-4" />
+              </Button>
+            }
+          />
+          
           {/* Provider Selector */}
           <Select value={provider} onValueChange={(v) => setProvider(v as LLMProvider)}>
             <SelectTrigger className="w-[140px] h-8">
@@ -478,6 +672,11 @@ export const AgentWorkspace = ({ agent, userId }: AgentWorkspaceProps) => {
             <p className="text-xs text-muted-foreground mt-1">
               Supported: {agentRole?.fileTypes.join(', ')}, images
             </p>
+            {storedFilesCount > 0 && (
+              <p className="text-xs text-primary mt-2">
+                💾 {storedFilesCount} file(s) already stored in session memory
+              </p>
+            )}
           </div>
         ) : (
           <div className="space-y-2">
@@ -655,9 +854,10 @@ export const AgentWorkspace = ({ agent, userId }: AgentWorkspaceProps) => {
               )}
             </Button>
           </div>
-          {uploadedFiles.length > 0 && (
+          {(uploadedFiles.length > 0 || storedFilesCount > 0) && (
             <p className="text-xs text-muted-foreground mt-2">
-              {uploadedFiles.length} file(s) will be processed with your request
+              {uploadedFiles.length > 0 && `${uploadedFiles.length} new file(s) will be processed. `}
+              {storedFilesCount > 0 && `${storedFilesCount} stored file(s) available as context.`}
             </p>
           )}
         </div>

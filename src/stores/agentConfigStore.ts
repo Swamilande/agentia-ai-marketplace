@@ -41,6 +41,37 @@ export interface AgentSetupConfig {
   updatedAt: string;
 }
 
+// Stored file data for persistent memory
+export interface StoredFileData {
+  id: string;
+  name: string;
+  size: number;
+  type: string;
+  processedContent: string; // The extracted text content
+  base64Data?: string; // For images
+  uploadedAt: string;
+}
+
+// Chat message for persistent history
+export interface StoredMessage {
+  id: string;
+  type: 'input' | 'output' | 'system' | 'error';
+  content: string;
+  encrypted: string;
+  timestamp: string;
+  status?: 'pending' | 'success' | 'error';
+  executionTime?: number;
+  tokensUsed?: number;
+  provider?: 'gemini' | 'openai';
+  files?: { name: string; size: number }[];
+  outputs?: {
+    filename: string;
+    mimeType: string;
+    base64Data: string;
+    size: number;
+  }[];
+}
+
 export interface AgentSession {
   agentId: string;
   userId: string;
@@ -48,8 +79,17 @@ export interface AgentSession {
   status: 'active' | 'paused' | 'stopped';
   startedAt: string;
   lastActivity: string;
+  
+  // Chat history (persistent)
+  messages: StoredMessage[];
+  
+  // Stored file data (persistent across messages)
+  storedFiles: StoredFileData[];
+  
+  // Legacy history (keeping for compatibility)
   inputHistory: { timestamp: string; input: string; encrypted: string }[];
   outputHistory: { timestamp: string; output: string; encrypted: string }[];
+  
   metrics: {
     totalRequests: number;
     successfulRequests: number;
@@ -75,6 +115,16 @@ interface AgentConfigState {
   addInput: (sessionId: string, input: string) => void;
   addOutput: (sessionId: string, output: string) => void;
   updateMetrics: (sessionId: string, metrics: Partial<AgentSession['metrics']>) => void;
+  
+  // New: Message persistence
+  addMessage: (sessionId: string, message: StoredMessage) => void;
+  getMessages: (sessionId: string) => StoredMessage[];
+  clearMessages: (sessionId: string) => void;
+  
+  // New: File data persistence
+  storeFileData: (sessionId: string, fileData: StoredFileData) => void;
+  getStoredFiles: (sessionId: string) => StoredFileData[];
+  clearStoredFiles: (sessionId: string) => void;
   
   // Server sync
   syncConfigToServer: (config: AgentSetupConfig) => Promise<boolean>;
@@ -156,6 +206,8 @@ export const useAgentConfigStore = create<AgentConfigState>()(
           status: 'active',
           startedAt: new Date().toISOString(),
           lastActivity: new Date().toISOString(),
+          messages: [],
+          storedFiles: [],
           inputHistory: [],
           outputHistory: [],
           metrics: {
@@ -231,6 +283,66 @@ export const useAgentConfigStore = create<AgentConfigState>()(
           sessions: state.sessions.map(s =>
             s.sessionId === sessionId
               ? { ...s, metrics: { ...s.metrics, ...metrics } }
+              : s
+          ),
+        }));
+      },
+      
+      // New: Message persistence methods
+      addMessage: (sessionId: string, message: StoredMessage) => {
+        set((state) => ({
+          sessions: state.sessions.map(s =>
+            s.sessionId === sessionId
+              ? {
+                  ...s,
+                  messages: [...(s.messages || []), message],
+                  lastActivity: new Date().toISOString(),
+                }
+              : s
+          ),
+        }));
+      },
+      
+      getMessages: (sessionId: string) => {
+        const session = get().sessions.find(s => s.sessionId === sessionId);
+        return session?.messages || [];
+      },
+      
+      clearMessages: (sessionId: string) => {
+        set((state) => ({
+          sessions: state.sessions.map(s =>
+            s.sessionId === sessionId
+              ? { ...s, messages: [], lastActivity: new Date().toISOString() }
+              : s
+          ),
+        }));
+      },
+      
+      // New: File data persistence methods
+      storeFileData: (sessionId: string, fileData: StoredFileData) => {
+        set((state) => ({
+          sessions: state.sessions.map(s =>
+            s.sessionId === sessionId
+              ? {
+                  ...s,
+                  storedFiles: [...(s.storedFiles || []), fileData],
+                  lastActivity: new Date().toISOString(),
+                }
+              : s
+          ),
+        }));
+      },
+      
+      getStoredFiles: (sessionId: string) => {
+        const session = get().sessions.find(s => s.sessionId === sessionId);
+        return session?.storedFiles || [];
+      },
+      
+      clearStoredFiles: (sessionId: string) => {
+        set((state) => ({
+          sessions: state.sessions.map(s =>
+            s.sessionId === sessionId
+              ? { ...s, storedFiles: [], lastActivity: new Date().toISOString() }
               : s
           ),
         }));

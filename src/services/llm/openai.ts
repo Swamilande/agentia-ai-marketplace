@@ -1,6 +1,7 @@
 import OpenAI from 'openai';
 import { AgentRole } from '@/data/agentRoles';
 import { extractOutputsFromResponse, getCleanMessage, AgentOutput } from '@/services/outputExtractor';
+import { getOpenaiApiKey } from '@/stores/apiKeyStore';
 
 export interface OpenAIExecutionResult {
   message: string;
@@ -10,17 +11,21 @@ export interface OpenAIExecutionResult {
 }
 
 let openaiClient: OpenAI | null = null;
+let lastApiKey: string = '';
 
 function getClient(): OpenAI {
-  if (!openaiClient) {
-    const apiKey = import.meta.env.VITE_OPENAI_API_KEY;
+  const apiKey = getOpenaiApiKey();
+  
+  // Recreate client if API key changed
+  if (!openaiClient || apiKey !== lastApiKey) {
     if (!apiKey) {
-      throw new Error('VITE_OPENAI_API_KEY is not configured. Please add your OpenAI API key.');
+      throw new Error('OpenAI API key is not configured. Please add your API key in Settings.');
     }
     openaiClient = new OpenAI({
       apiKey,
       dangerouslyAllowBrowser: true // Required for client-side usage
     });
+    lastApiKey = apiKey;
   }
   return openaiClient;
 }
@@ -119,7 +124,7 @@ export async function executeWithOpenAI(
 }
 
 export function checkOpenAIApiKey(): boolean {
-  const apiKey = import.meta.env.VITE_OPENAI_API_KEY;
+  const apiKey = getOpenaiApiKey();
   return !!apiKey && apiKey.length > 10 && apiKey !== 'your_openai_api_key_here';
 }
 
