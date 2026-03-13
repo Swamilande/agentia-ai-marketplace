@@ -14,7 +14,150 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      agents: {
+        Row: {
+          category: string
+          color: string
+          created_at: string | null
+          description: string
+          features: Json
+          icon: string
+          id: string
+          is_active: boolean | null
+          name: string
+          price_cents: number
+          slug: string
+          tagline: string
+        }
+        Insert: {
+          category: string
+          color?: string
+          created_at?: string | null
+          description: string
+          features?: Json
+          icon?: string
+          id?: string
+          is_active?: boolean | null
+          name: string
+          price_cents: number
+          slug: string
+          tagline: string
+        }
+        Update: {
+          category?: string
+          color?: string
+          created_at?: string | null
+          description?: string
+          features?: Json
+          icon?: string
+          id?: string
+          is_active?: boolean | null
+          name?: string
+          price_cents?: number
+          slug?: string
+          tagline?: string
+        }
+        Relationships: []
+      }
+      purchases: {
+        Row: {
+          agent_id: string
+          id: string
+          purchased_at: string | null
+          stripe_session_id: string | null
+          user_id: string
+        }
+        Insert: {
+          agent_id: string
+          id?: string
+          purchased_at?: string | null
+          stripe_session_id?: string | null
+          user_id: string
+        }
+        Update: {
+          agent_id?: string
+          id?: string
+          purchased_at?: string | null
+          stripe_session_id?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "purchases_agent_id_fkey"
+            columns: ["agent_id"]
+            isOneToOne: false
+            referencedRelation: "agents"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      task_outputs: {
+        Row: {
+          content: Json
+          created_at: string | null
+          id: string
+          output_type: string
+          task_id: string
+        }
+        Insert: {
+          content?: Json
+          created_at?: string | null
+          id?: string
+          output_type: string
+          task_id: string
+        }
+        Update: {
+          content?: Json
+          created_at?: string | null
+          id?: string
+          output_type?: string
+          task_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "task_outputs_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "tasks"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      tasks: {
+        Row: {
+          agent_id: string
+          created_at: string | null
+          id: string
+          input: Json
+          status: string | null
+          user_id: string
+        }
+        Insert: {
+          agent_id: string
+          created_at?: string | null
+          id?: string
+          input?: Json
+          status?: string | null
+          user_id: string
+        }
+        Update: {
+          agent_id?: string
+          created_at?: string | null
+          id?: string
+          input?: Json
+          status?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "tasks_agent_id_fkey"
+            columns: ["agent_id"]
+            isOneToOne: false
+            referencedRelation: "agents"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
