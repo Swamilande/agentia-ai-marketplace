@@ -1,7 +1,7 @@
 import { useState } from "react";
-import { Link, useLocation, useNavigate } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
-import { Menu, X, User, LogOut, Settings, LayoutDashboard } from "lucide-react";
+import { Bot, Menu, X, User, LogOut, Settings, LayoutDashboard } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -12,11 +12,11 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import { useAuthStore } from "@/stores/authStore";
+import { useNavigate } from "react-router-dom";
 
 const navLinks = [
   { name: "Home", path: "/" },
   { name: "Marketplace", path: "/marketplace" },
-  { name: "How it works", path: "/#how-it-works" },
   { name: "About", path: "/about" },
   { name: "Contact", path: "/contact" },
 ];
@@ -42,11 +42,12 @@ export function Navbar() {
       <nav className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-16">
           {/* Logo */}
-          <Link to="/" className="flex items-center gap-2.5 group">
-            <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center font-black text-sm text-primary-foreground">
-              A
+          <Link to="/" className="flex items-center gap-2 group">
+            <div className="relative">
+              <Bot className="h-8 w-8 text-primary transition-transform duration-300 group-hover:scale-110" />
+              <div className="absolute inset-0 bg-primary/20 blur-xl rounded-full opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
             </div>
-            <span className="text-lg font-bold tracking-tight">Agentia</span>
+            <span className="text-xl font-black tracking-tight">Agentia</span>
           </Link>
 
           {/* Desktop Navigation */}
@@ -110,14 +111,14 @@ export function Navbar() {
               </>
             ) : (
               <>
-                <Link to="/marketplace">
-                  <Button variant="default" size="sm" className="rounded-full">
-                    Explore Marketplace
+                <Link to="/auth/login">
+                  <Button variant="ghost" className="text-muted-foreground hover:text-foreground">
+                    Sign in
                   </Button>
                 </Link>
                 <Link to="/auth/signup">
-                  <Button variant="hero-outline" size="sm" className="!h-9 !px-4 !text-sm">
-                    Start Building
+                  <Button variant="default" className="rounded-full">
+                    Get Started
                   </Button>
                 </Link>
               </>
@@ -129,7 +130,11 @@ export function Navbar() {
             className="md:hidden p-2 rounded-lg hover:bg-secondary transition-colors"
             onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
           >
-            {mobileMenuOpen ? <X className="h-6 w-6" /> : <Menu className="h-6 w-6" />}
+            {mobileMenuOpen ? (
+              <X className="h-6 w-6" />
+            ) : (
+              <Menu className="h-6 w-6" />
+            )}
           </button>
         </div>
 
@@ -177,7 +182,10 @@ export function Navbar() {
                         Dashboard
                       </Link>
                       <button
-                        onClick={() => { handleLogout(); setMobileMenuOpen(false); }}
+                        onClick={() => {
+                          handleLogout();
+                          setMobileMenuOpen(false);
+                        }}
                         className="px-4 py-3 text-base font-medium rounded-lg text-destructive hover:bg-destructive/10 text-left transition-colors flex items-center gap-2"
                       >
                         <LogOut className="h-4 w-4" />
@@ -186,10 +194,17 @@ export function Navbar() {
                     </>
                   ) : (
                     <>
-                      <Link to="/auth/login" onClick={() => setMobileMenuOpen(false)} className="px-4 py-3 text-base font-medium rounded-lg hover:bg-secondary transition-colors">
+                      <Link
+                        to="/auth/login"
+                        onClick={() => setMobileMenuOpen(false)}
+                        className="px-4 py-3 text-base font-medium rounded-lg hover:bg-secondary transition-colors"
+                      >
                         Sign in
                       </Link>
-                      <Link to="/auth/signup" onClick={() => setMobileMenuOpen(false)}>
+                      <Link
+                        to="/auth/signup"
+                        onClick={() => setMobileMenuOpen(false)}
+                      >
                         <Button className="w-full rounded-full">Get Started</Button>
                       </Link>
                     </>
