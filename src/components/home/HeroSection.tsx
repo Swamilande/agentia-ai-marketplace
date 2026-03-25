@@ -3,22 +3,31 @@ import { Link } from "react-router-dom";
 import { ArrowRight, Zap, Shield, BarChart3, Clock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import Spline from "@splinetool/react-spline";
+import { Suspense } from "react";
 
 export function HeroSection() {
   return (
-    <section className="relative pt-32 pb-20 lg:pt-48 lg:pb-32 overflow-hidden">
-      {/* Background elements */}
-      <div className="absolute inset-0 bg-grid opacity-50" />
-      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[800px] bg-primary/5 rounded-full blur-3xl" />
-      
-      <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+    <section className="relative pt-32 pb-20 lg:pt-40 lg:pb-28 overflow-hidden min-h-[90vh] flex items-center">
+      {/* Spline 3D Background */}
+      <div className="absolute inset-0 z-0">
+        <Suspense fallback={<div className="absolute inset-0 bg-background" />}>
+          <Spline
+            scene="https://prod.spline.design/nexbotbyaximoriscopycopy-3WMCqH0PMu4zv7afcsEglLUM/scene.splinecode"
+            className="w-full h-full"
+          />
+        </Suspense>
+        {/* Gradient overlay for text readability */}
+        <div className="absolute inset-0 bg-gradient-to-b from-background/70 via-background/50 to-background/90" />
+      </div>
+
+      <div className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 w-full">
         <motion.div
           initial={{ opacity: 0, y: 30 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.8, ease: "easeOut" }}
           className="text-center"
         >
-          {/* Badge */}
           <motion.div
             initial={{ opacity: 0, scale: 0.9 }}
             animate={{ opacity: 1, scale: 1 }}
@@ -30,13 +39,12 @@ export function HeroSection() {
             </Badge>
           </motion.div>
 
-          {/* Main Title */}
           <h1 className="text-5xl lg:text-8xl font-black tracking-tighter mb-6 leading-[0.9]">
             <motion.span
               initial={{ opacity: 0, x: -20 }}
               animate={{ opacity: 1, x: 0 }}
               transition={{ delay: 0.3, duration: 0.8 }}
-              className="block"
+              className="block drop-shadow-lg"
             >
               Deploy AI Agents
             </motion.span>
@@ -44,23 +52,21 @@ export function HeroSection() {
               initial={{ opacity: 0, x: 20 }}
               animate={{ opacity: 1, x: 0 }}
               transition={{ delay: 0.5, duration: 0.8 }}
-              className="block text-gradient"
+              className="block text-gradient drop-shadow-lg"
             >
               In Seconds
             </motion.span>
           </h1>
 
-          {/* Subtitle */}
           <motion.p
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ delay: 0.7, duration: 1 }}
-            className="text-xl lg:text-2xl text-muted-foreground font-light max-w-3xl mx-auto mb-10 leading-relaxed"
+            className="text-xl lg:text-2xl text-muted-foreground font-light max-w-3xl mx-auto mb-10 leading-relaxed drop-shadow-sm"
           >
             The premier marketplace for production-ready AI agents. From customer support to sales automation—find, deploy, and scale intelligent solutions instantly.
           </motion.p>
 
-          {/* CTA Buttons */}
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
@@ -80,7 +86,6 @@ export function HeroSection() {
             </Link>
           </motion.div>
 
-          {/* Trust indicators */}
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
