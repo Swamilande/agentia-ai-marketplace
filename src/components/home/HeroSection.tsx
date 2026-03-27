@@ -3,24 +3,16 @@ import { Link } from "react-router-dom";
 import { ArrowRight, Zap, Shield, BarChart3, Clock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import Spline from "@splinetool/react-spline";
-import { Suspense } from "react";
 
 export function HeroSection() {
   return (
     <section className="relative pt-32 pb-20 lg:pt-40 lg:pb-28 overflow-hidden min-h-[90vh] flex items-center">
-      {/* Spline 3D Background */}
-      <div className="absolute inset-0 z-0 pointer-events-none">
-        <Suspense fallback={<div className="absolute inset-0 bg-background" />}>
-          <div className="w-full h-full [&>canvas]:!pointer-events-none">
-            <Spline
-              scene="https://prod.spline.design/nexbotbyaximoriscopycopy-3WMCqH0PMu4zv7afcsEglLUM/scene.splinecode"
-              className="w-full h-full"
-            />
-          </div>
-        </Suspense>
-        {/* Gradient overlay for text readability */}
-        <div className="absolute inset-0 bg-gradient-to-b from-black/30 via-black/20 to-background/80" />
+      {/* Animated gradient background */}
+      <div className="absolute inset-0 z-0">
+        <div className="absolute inset-0 bg-gradient-to-br from-primary/20 via-background to-accent/10 animate-pulse" />
+        <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-primary/10 rounded-full blur-3xl animate-[pulse_4s_ease-in-out_infinite]" />
+        <div className="absolute bottom-1/4 right-1/4 w-80 h-80 bg-accent/10 rounded-full blur-3xl animate-[pulse_6s_ease-in-out_infinite]" />
+        <div className="absolute inset-0 bg-grid opacity-30" />
       </div>
 
       <div className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 w-full">
